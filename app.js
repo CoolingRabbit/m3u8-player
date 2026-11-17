@@ -16,11 +16,14 @@
     url: 'https://liveprodusphoenixeast.akamaized.net/USPhx-HD/Channel-TX-USPhx-AWS-virginia-1/Source-USPhx-16k-1-s6lk2-BP-07-02-81ykIWnsMsg_live.m3u8'
   };
   const DEFAULT_SETTINGS = {
+    appName: 'm3u8-player',
     auto: true,
     latency: 60,
     buffer: 180,
     scheduleEnabled: true,
     scheduleTime: '04:00',
+    intervalEnabled: false,
+    intervalMinutes: 60,
     volume: 0.72,
     muted: true
   };
@@ -33,12 +36,14 @@
   let retryTimer = null;
   let retryAttempt = 0;
   let toastTimer = null;
+  let controlsIdleTimer = null;
   let editingChannelId = null;
   let autoConfigured = false;
   let autoRecommendation = { latency: 6, buffer: 30, window: 0, targetDuration: 2 };
   let downloadEvents = [];
   let chartSamples = Array(30).fill(0);
   let streamStartedAt = performance.now();
+  let intervalNextRun = Date.now() + Number(settings.intervalMinutes || 60) * 60000;
   let stallCount = 0;
   let previousStallCount = 0;
   let chartTick = 0;
@@ -133,6 +138,8 @@
   function setReloadBusy(busy) {
     $('#reloadButton').classList.toggle('loading', busy);
     $('#reloadButton span').textContent = busy ? '正在重新连接...' : '立即重新拉流';
+    $('#playerReloadButton').classList.toggle('loading', busy);
+    $('#playerReloadButton').disabled = busy;
   }
 
   function createChannelCard(channel) {
@@ -195,8 +202,15 @@
     currentId = channel.id;
     $('#currentChannel').textContent = channel.name;
     $('#channelIntro h2').textContent = channel.name;
-    document.title = `${channel.name} · 澜播`;
+    document.title = `${channel.name} · ${settings.appName}`;
     saveChannels();
+  }
+
+  function applyAppName(value) {
+    settings.appName = value.trim().slice(0, 32) || DEFAULT_SETTINGS.appName;
+    $('#appNameInput').value = settings.appName;
+    saveSettings();
+    updateChannelHeading();
   }
 
   function selectChannel(id) {
@@ -295,10 +309,15 @@
     if (reason !== 'retry') retryAttempt = 0;
     previousStallCount = stallCount;
     autoConfigured = false;
+    resetIntervalCountdown();
     destroyStream();
     resetMetrics();
     $('#playerError').hidden = true;
-    setLoading(true, reason === 'scheduled' ? '每日定时重新拉流...' : '正在连接直播流...');
+    const loadingLabels = {
+      scheduled: '每日定时重新拉流...',
+      interval: '倒计时重新拉流...'
+    };
+    setLoading(true, loadingLabels[reason] || '正在连接直播流...');
     setReloadBusy(true);
     setStatus('正在连接直播', 'loading');
     $('#streamLabel').textContent = 'HLS · 正在连接';
@@ -584,6 +603,10 @@
     $('#scheduleTime').value = settings.scheduleTime;
     $('#scheduleTime').disabled = !settings.scheduleEnabled;
     $('.next-reload').style.opacity = settings.scheduleEnabled ? '1' : '0.42';
+    $('#intervalToggle').checked = settings.intervalEnabled;
+    $('#intervalMinutes').value = settings.intervalMinutes;
+    $('#intervalMinutes').disabled = !settings.intervalEnabled;
+    $('#intervalCountdownCard').style.opacity = settings.intervalEnabled ? '1' : '0.42';
     $('#latencyRange').disabled = settings.auto;
     $('#bufferRange').disabled = settings.auto;
     $('#latencyValue').classList.toggle('auto', settings.auto);
@@ -631,6 +654,13 @@
     if (now >= scheduledTimeToday(now)) writeStorage(STORAGE.scheduleRun, scheduleKey(now));
   }
 
+  function formatCountdown(totalSeconds) {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
   function updateNextReload() {
     if (!settings.scheduleEnabled) {
       $('#nextReload').textContent = '定时任务已关闭';
@@ -640,22 +670,41 @@
     const target = scheduledTimeToday(now);
     if (target <= now) target.setDate(target.getDate() + 1);
     const totalSeconds = Math.max(0, Math.floor((target - now) / 1000));
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    $('#nextReload').textContent = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    $('#nextReload').textContent = formatCountdown(totalSeconds);
+  }
+
+  function resetIntervalCountdown() {
+    const minutes = Math.max(1, Math.min(1440, Number(settings.intervalMinutes) || 60));
+    intervalNextRun = Date.now() + minutes * 60000;
+    updateIntervalReload();
+  }
+
+  function updateIntervalReload() {
+    if (!settings.intervalEnabled) {
+      $('#nextIntervalReload').textContent = '倒计时任务已关闭';
+      return;
+    }
+    const totalSeconds = Math.max(0, Math.ceil((intervalNextRun - Date.now()) / 1000));
+    $('#nextIntervalReload').textContent = formatCountdown(totalSeconds);
   }
 
   function checkSchedule() {
     updateNextReload();
-    if (!settings.scheduleEnabled) return;
+    updateIntervalReload();
     const now = new Date();
-    if (now < scheduledTimeToday(now)) return;
-    const key = scheduleKey(now);
-    if (readStorage(STORAGE.scheduleRun) === key) return;
-    writeStorage(STORAGE.scheduleRun, key);
-    showToast(`已到 ${settings.scheduleTime}，正在执行每日重新拉流`);
-    loadStream('scheduled');
+    if (settings.scheduleEnabled && now >= scheduledTimeToday(now)) {
+      const key = scheduleKey(now);
+      if (readStorage(STORAGE.scheduleRun) !== key) {
+        writeStorage(STORAGE.scheduleRun, key);
+        showToast(`已到 ${settings.scheduleTime}，正在执行每日重新拉流`);
+        loadStream('scheduled');
+        return;
+      }
+    }
+    if (settings.intervalEnabled && Date.now() >= intervalNextRun) {
+      showToast(`已完成 ${settings.intervalMinutes} 分钟倒计时，正在重新拉流`);
+      loadStream('interval');
+    }
   }
 
   $('#addChannelTop').addEventListener('click', () => openChannelDialog());
@@ -717,16 +766,17 @@
     if (video.paused) playVideo();
     else video.pause();
   });
-  video.addEventListener('click', () => {
-    if (video.paused) playVideo();
-    else video.pause();
-  });
   video.addEventListener('dblclick', toggleFullscreen);
-  video.addEventListener('play', updatePlayButton);
+  video.addEventListener('play', () => {
+    updatePlayButton();
+    showPlayerControls();
+  });
   video.addEventListener('pause', () => {
     updatePlayButton();
     setLoading(false);
     setStatus('播放已暂停');
+    clearTimeout(controlsIdleTimer);
+    $('#playerCard').classList.remove('is-idle');
   });
   video.addEventListener('playing', () => {
     retryAttempt = 0;
@@ -734,6 +784,7 @@
     setReloadBusy(false);
     setStatus('直播播放中');
     updatePlayButton();
+    showPlayerControls();
   });
   video.addEventListener('canplay', () => {
     setLoading(false);
@@ -742,6 +793,7 @@
   video.addEventListener('waiting', () => {
     if (video.paused) return;
     stallCount += 1;
+    showPlayerControls();
     setLoading(true, '网络缓冲中...');
     setStatus('正在缓冲', 'loading');
   });
@@ -780,14 +832,39 @@
     }
   }
 
+  function showPlayerControls() {
+    const player = $('#playerCard');
+    player.classList.remove('is-idle');
+    player.classList.add('controls-visible');
+    clearTimeout(controlsIdleTimer);
+    if (document.fullscreenElement !== player || video.paused) return;
+    controlsIdleTimer = setTimeout(() => {
+      if (document.fullscreenElement === player && !video.paused) {
+        player.classList.remove('controls-visible');
+        player.classList.add('is-idle');
+      }
+    }, 3000);
+  }
+
+  async function openSettings() {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    $('.settings-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   $('#fullscreenButton').addEventListener('click', toggleFullscreen);
-  $('#settingsButton').addEventListener('click', () => $('.settings-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  $('#settingsButton').addEventListener('click', openSettings);
   $('#reloadButton').addEventListener('click', () => loadStream('manual'));
+  $('#playerReloadButton').addEventListener('click', () => loadStream('manual'));
   $('#retryButton').addEventListener('click', () => loadStream('manual'));
   document.addEventListener('fullscreenchange', () => {
     $('#fullscreenButton').setAttribute('aria-label', document.fullscreenElement ? '退出全屏' : '全屏');
+    showPlayerControls();
+  });
+  ['mousemove', 'pointerdown', 'touchstart'].forEach((eventName) => {
+    $('#playerCard').addEventListener(eventName, showPlayerControls, { passive: true });
   });
   document.addEventListener('keydown', (event) => {
+    showPlayerControls();
     if (event.target.closest('input, button, dialog')) return;
     if (event.code === 'Space') {
       event.preventDefault();
@@ -798,6 +875,10 @@
     } else if (event.key.toLowerCase() === 'm') {
       video.muted = !video.muted;
     }
+  });
+  $('#appNameInput').addEventListener('change', (event) => applyAppName(event.target.value));
+  $('#appNameInput').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') event.target.blur();
   });
 
   $('#autoToggle').addEventListener('change', (event) => {
@@ -828,16 +909,36 @@
   });
   $('#scheduleToggle').addEventListener('change', (event) => {
     settings.scheduleEnabled = event.target.checked;
+    if (settings.scheduleEnabled) settings.intervalEnabled = false;
     saveSettings();
     markCurrentScheduleDone();
+    resetIntervalCountdown();
     renderSettings();
     updateNextReload();
+    updateIntervalReload();
   });
   $('#scheduleTime').addEventListener('change', (event) => {
     settings.scheduleTime = event.target.value || '04:00';
     saveSettings();
     markCurrentScheduleDone();
     updateNextReload();
+  });
+  $('#intervalToggle').addEventListener('change', (event) => {
+    settings.intervalEnabled = event.target.checked;
+    if (settings.intervalEnabled) settings.scheduleEnabled = false;
+    saveSettings();
+    markCurrentScheduleDone();
+    resetIntervalCountdown();
+    renderSettings();
+    updateNextReload();
+    updateIntervalReload();
+  });
+  $('#intervalMinutes').addEventListener('change', (event) => {
+    settings.intervalMinutes = Math.max(1, Math.min(1440, Math.round(Number(event.target.value)) || 60));
+    event.target.value = settings.intervalMinutes;
+    saveSettings();
+    resetIntervalCountdown();
+    renderSettings();
   });
   window.addEventListener('online', () => {
     showToast('网络已恢复，正在重新连接');
@@ -846,15 +947,21 @@
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) checkSchedule();
   });
-  window.addEventListener('beforeunload', () => destroyStream());
+  window.addEventListener('beforeunload', () => {
+    clearTimeout(controlsIdleTimer);
+    destroyStream();
+  });
 
   if (!channels.some((channel) => channel.id === currentId)) currentId = channels[0].id;
+  if (settings.intervalEnabled) settings.scheduleEnabled = false;
+  settings.intervalMinutes = Math.max(1, Math.min(1440, Number(settings.intervalMinutes) || 60));
   video.volume = Math.max(0, Math.min(1, Number(settings.volume)));
   video.muted = settings.muted !== false;
-  updateChannelHeading();
+  applyAppName(String(settings.appName || DEFAULT_SETTINGS.appName));
   renderChannels();
   renderSettings();
   updateNextReload();
+  resetIntervalCountdown();
   markCurrentScheduleDone();
   if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(sampleFrames);
   else $('#fpsFoot').textContent = '使用清单标称值';

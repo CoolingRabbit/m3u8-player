@@ -14,7 +14,7 @@ files = {
     "vendor/hls.min.js": "vendor/hls.min.js",
     "vendor/hls.LICENSE.txt": "vendor/hls.LICENSE.txt",
 }
-archive_name = f"lan-live-player-v{version}.zip"
+archive_name = f"m3u8-player-v{version}.zip"
 archive_path = ROOT / "dist" / archive_name
 archive_path.parent.mkdir(exist_ok=True)
 
@@ -23,7 +23,7 @@ with ZipFile(archive_path, "w", compression=ZIP_DEFLATED, compresslevel=9) as ar
         source_path = ROOT / source
         if not source_path.is_file():
             raise FileNotFoundError(source_path)
-        archive.write(source_path, f"lan-live-player-v{version}/{target}")
+        archive.write(source_path, f"m3u8-player-v{version}/{target}")
 
 with ZipFile(archive_path) as archive:
     bad_file = archive.testzip()

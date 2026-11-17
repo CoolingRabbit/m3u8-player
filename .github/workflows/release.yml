@@ -21,16 +21,17 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: "澜播 ${{ github.ref_name }}"
+          name: "m3u8-player ${{ github.ref_name }}"
           body: |
             本地 M3U8/HLS 直播播放器，包含以下功能：
-            - 多频道管理、搜索和域名标签
-            - 全屏、音量及键盘快捷键
+            - 多频道管理、搜索、域名标签和自定义界面名称
+            - 全屏空闲自动隐藏控制栏、音量及键盘快捷键
             - 实测分辨率、帧率、码率、延迟和缓存
             - 自动或手动延迟缓存设置
-            - 每日定时重新拉流和失败自动重试
+            - 每日定时或分钟倒计时重新拉流（互斥）
+            - 播放区快速重拉和失败自动重试
 
-            解压后使用 Edge 或 Chrome 打开 index.html。首次播放为静音，点击音量键取消静音。每日定时任务需要保持页面打开。
-          files: dist/lan-live-player-v*.zip
+            解压后使用 Edge 或 Chrome 打开 index.html。首次播放为静音，点击音量键取消静音。自动重拉任务需要保持页面打开。
+          files: dist/m3u8-player-v*.zip
           draft: false
           prerelease: false

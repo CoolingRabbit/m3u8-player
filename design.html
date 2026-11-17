@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>澜播 · M3U8 直播播放器</title>
+  <title>m3u8-player · M3U8 直播播放器</title>
   <style>
     :root {
       color-scheme: dark;
@@ -446,7 +446,7 @@
 
     .player-controls {
       position: absolute;
-      z-index: 4;
+      z-index: 7;
       left: 0;
       right: 0;
       bottom: 0;
@@ -727,6 +727,7 @@
     .player-card:fullscreen { border: 0; border-radius: 0; background: #000; }
     .player-card:fullscreen .player-stage { width: 100%; height: 100vh; aspect-ratio: auto; }
     .player-loading, .player-error { position: absolute; z-index: 6; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; background: rgba(5, 9, 14, 0.76); backdrop-filter: blur(8px); text-align: center; }
+    .player-loading { pointer-events: none; }
     .loading-spinner { width: 30px; height: 30px; border: 2px solid rgba(98, 230, 182, 0.18); border-top-color: var(--accent); border-radius: 50%; animation: spin 800ms linear infinite; }
     .loading-label { color: var(--text-soft); font-size: 12px; }
     .error-title { font-size: 15px; font-weight: 650; }
@@ -747,6 +748,19 @@
     .health-badge.warning { background: rgba(242,200,121,.1); color: #f2c879; }
     .health-badge.error { background: rgba(255,127,135,.1); color: var(--danger); }
     .chart-line, .chart-area { transition: d 400ms ease; }
+    .brand-name-input { width: 190px; padding: 2px 5px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text); }
+    .brand-name-input:hover { border-color: var(--border); background: rgba(255,255,255,.025); }
+    .brand-name-input:focus { border-color: var(--accent-strong); outline: 0; background: var(--panel-soft); }
+    .player-controls, .player-top, .optimization-toast, .unmute-hint { transition: opacity 200ms ease; }
+    .player-card.is-idle { cursor: none; }
+    .player-card.is-idle .player-controls, .player-card.is-idle .player-top, .player-card.is-idle .optimization-toast, .player-card.is-idle .unmute-hint { opacity: 0; pointer-events: none; }
+    .player-card.controls-visible .player-controls, .player-card.controls-visible .player-top, .player-card.controls-visible .optimization-toast, .player-card.controls-visible .unmute-hint { opacity: 1; pointer-events: auto; }
+    .control-button.loading .icon { animation: spin 800ms linear infinite; }
+    .control-button:disabled { opacity: .45; cursor: default; }
+    .minutes-input { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+    .minutes-input input { width: 66px; height: 32px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel-soft); color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .minutes-input input:disabled { opacity: .4; }
+    @media (max-width: 520px) { .brand-name-input { width: 155px; } }
   </style>
 </head>
 <body>
@@ -780,8 +794,7 @@
       <div class="brand">
         <div class="brand-mark"><svg class="icon"><use href="#i-play"/></svg></div>
         <div>
-          <div class="brand-name">澜播</div>
-          <div class="brand-subtitle">LAN LIVE PLAYER</div>
+          <input class="brand-name brand-name-input" id="appNameInput" value="m3u8-player" maxlength="32" aria-label="界面名称" title="点击修改界面名称">
         </div>
       </div>
       <div class="topbar-right">
@@ -856,6 +869,7 @@
               <div class="live-timing"><span class="status-dot"></span>直播 <span>·</span> 延迟 <strong id="controlLatency">-- 秒</strong></div>
               <div class="control-spacer"></div>
               <span class="quality-pill" id="qualityPill">自动识别</span>
+              <button class="control-button" id="playerReloadButton" aria-label="重新拉流" title="重新拉流"><svg class="icon"><use href="#i-refresh"/></svg></button>
               <button class="control-button" id="settingsButton" aria-label="播放设置"><svg class="icon"><use href="#i-settings"/></svg></button>
               <button class="control-button" id="fullscreenButton" aria-label="全屏"><svg class="icon"><use href="#i-fullscreen"/></svg></button>
             </div>
@@ -969,6 +983,31 @@
           </div>
           <button class="primary-button" id="reloadButton"><svg class="icon"><use href="#i-refresh"/></svg><span>立即重新拉流</span></button>
           <div class="setting-help"><svg class="icon"><use href="#i-info"/></svg><span>保留当前频道、音量和播放参数，失败后自动重试；每日任务需要保持本页面打开。</span></div>
+        </section>
+
+        <section class="setting-section">
+          <div class="setting-row">
+            <div>
+              <div class="setting-name">倒计时重新拉流</div>
+              <div class="setting-description">与每日定时互斥，开启后自动关闭另一项</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="intervalToggle" aria-label="倒计时重新拉流">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="setting-row" style="margin-top:15px">
+            <span class="setting-description" style="margin:0">重拉间隔</span>
+            <label class="minutes-input"><input id="intervalMinutes" type="number" min="1" max="1440" step="1" value="60" aria-label="倒计时重新拉流间隔分钟"><span>分钟</span></label>
+          </div>
+          <div class="next-reload" id="intervalCountdownCard">
+            <div class="next-reload-icon"><svg class="icon"><use href="#i-clock"/></svg></div>
+            <div>
+              <div class="next-reload-label">距离本次倒计时结束</div>
+              <div class="next-reload-time" id="nextIntervalReload">已关闭</div>
+            </div>
+          </div>
+          <div class="setting-help"><svg class="icon"><use href="#i-info"/></svg><span>任意重新拉流后重新计时；页面保持打开时生效。</span></div>
         </section>
 
         <section class="setting-section">
