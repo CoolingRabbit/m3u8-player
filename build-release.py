@@ -11,6 +11,8 @@ files = {
     "design.html": "index.html",
     "app.js": "app.js",
     "VERSION": "VERSION",
+    "README.md": "README.md",
+    "LICENSE": "LICENSE",
     "vendor/hls.min.js": "vendor/hls.min.js",
     "vendor/hls.LICENSE.txt": "vendor/hls.LICENSE.txt",
 }
