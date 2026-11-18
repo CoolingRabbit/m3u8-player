@@ -10,6 +10,7 @@ if not re.fullmatch(r"\d+\.\d+\.\d+", version):
 files = {
     "design.html": "index.html",
     "app.js": "app.js",
+    "logger.js": "logger.js",
     "VERSION": "VERSION",
     "README.md": "README.md",
     "LICENSE": "LICENSE",
